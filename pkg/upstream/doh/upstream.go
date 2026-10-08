@@ -44,13 +44,14 @@ var nopLogger = zap.NewNop()
 
 // Upstream is a DNS-over-HTTPS (RFC 8484) upstream.
 type Upstream struct {
-	rt          http.RoundTripper
-	logger      *zap.Logger // non-nil
-	urlTemplate *urlpkg.URL
-	reqTemplate *http.Request
+	rt             http.RoundTripper
+	logger         *zap.Logger // non-nil
+	urlTemplate    *urlpkg.URL
+	reqTemplate    *http.Request
+	requestTimeout time.Duration
 }
 
-func NewUpstream(endPoint string, rt http.RoundTripper, logger *zap.Logger) (*Upstream, error) {
+func NewUpstream(endPoint string, rt http.RoundTripper, logger *zap.Logger, timeout ...time.Duration) (*Upstream, error) {
 	req, err := http.NewRequest(http.MethodGet, endPoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse http request, %w", err)
@@ -62,11 +63,19 @@ func NewUpstream(endPoint string, rt http.RoundTripper, logger *zap.Logger) (*Up
 	if logger == nil {
 		logger = nopLogger
 	}
+	var requestTimeout time.Duration
+	if len(timeout) > 0 {
+		requestTimeout = timeout[0]
+	}
+	if requestTimeout <= 0 {
+		requestTimeout = defaultDoHTimeout
+	}
 	return &Upstream{
-		rt:          rt,
-		logger:      logger,
-		urlTemplate: req.URL,
-		reqTemplate: req,
+		rt:             rt,
+		logger:         logger,
+		urlTemplate:    req.URL,
+		reqTemplate:    req,
+		requestTimeout: requestTimeout,
 	}, nil
 }
 
@@ -109,7 +118,7 @@ func (u *Upstream) ExchangeContext(ctx context.Context, q []byte) (*[]byte, erro
 		// Because the http package may close the underlay connection
 		// if the context is done before the query is completed. This
 		// reduces the connection reuse efficiency.
-		ctx, cancel := context.WithTimeout(context.Background(), defaultDoHTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), u.requestTimeout)
 		defer cancel()
 		r, err := u.exchange(ctx, utils.BytesToStringUnsafe(queryBuf))
 		if err != nil {
