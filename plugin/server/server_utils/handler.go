@@ -21,6 +21,7 @@ package server_utils
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/server"
@@ -28,7 +29,7 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 )
 
-func NewHandler(bp *coremain.BP, entry string) (server.Handler, error) {
+func NewHandler(bp *coremain.BP, entry string, queryTimeout ...time.Duration) (server.Handler, error) {
 	p := bp.M().GetPlugin(entry)
 	exec := sequence.ToExecutable(p)
 	if exec == nil {
@@ -38,6 +39,9 @@ func NewHandler(bp *coremain.BP, entry string) (server.Handler, error) {
 	handlerOpts := server_handler.EntryHandlerOpts{
 		Logger: bp.L(),
 		Entry:  exec,
+	}
+	if len(queryTimeout) > 0 {
+		handlerOpts.QueryTimeout = queryTimeout[0]
 	}
 	return server_handler.NewEntryHandler(handlerOpts), nil
 }

@@ -47,7 +47,7 @@ import (
 )
 
 const (
-	tlsHandshakeTimeout = time.Second * 3
+	defaultTLSHandshakeTimeout = time.Second * 3
 
 	// Maximum number of concurrent queries in one pipeline connection.
 	// See RFC 7766 7. Response Reordering.
@@ -90,6 +90,13 @@ type Opt struct {
 	// IdleTimeout specifies the idle timeout for long-connections.
 	// Default: TCP, DoT: 10s , DoH, DoH3, Quic: 30s.
 	IdleTimeout time.Duration
+
+	// TLSHandshakeTimeout limits the TLS handshake for HTTP/1 and HTTP/2 DoH.
+	// Default: 3s.
+	TLSHandshakeTimeout time.Duration
+
+	// DoHRequestTimeout limits the complete DoH HTTP request. Default: 6s.
+	DoHRequestTimeout time.Duration
 
 	// EnablePipeline enables query pipelining support as RFC 7766 6.2.1.1 suggested.
 	// Available for TCP, DoT upstream.
@@ -401,6 +408,10 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 		return transport.NewReuseConnTransport(transport.ReuseConnOpts{DialContext: dialNetConn}), nil
 	case "https":
 		const defaultPort = 443
+		tlsHandshakeTimeout := opt.TLSHandshakeTimeout
+		if tlsHandshakeTimeout <= 0 {
+			tlsHandshakeTimeout = defaultTLSHandshakeTimeout
+		}
 
 		idleConnTimeout := time.Second * 30
 		if opt.IdleTimeout > 0 {
@@ -471,7 +482,7 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 			t = t1
 		}
 
-		u, err := doh.NewUpstream(addrURL.String(), t, opt.Logger)
+		u, err := doh.NewUpstream(addrURL.String(), t, opt.Logger, opt.DoHRequestTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create doh upstream, %w", err)
 		}
@@ -604,6 +615,6 @@ func newDefaultClientQuicConfig() *quic.Config {
 
 		MaxIdleTimeout:       time.Second * 30,
 		KeepAlivePeriod:      time.Second * 25,
-		HandshakeIdleTimeout: tlsHandshakeTimeout,
+		HandshakeIdleTimeout: defaultTLSHandshakeTimeout,
 	}
 }

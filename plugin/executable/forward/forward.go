@@ -48,26 +48,32 @@ func init() {
 
 const (
 	maxConcurrentQueries = 3
-	queryTimeout         = time.Second * 5
+	defaultQueryTimeout  = time.Second * 5
 )
 
 type Args struct {
-	Upstreams  []UpstreamConfig `yaml:"upstreams"`
-	Concurrent int              `yaml:"concurrent"`
+	Upstreams    []UpstreamConfig `yaml:"upstreams"`
+	Concurrent   int              `yaml:"concurrent"`
+	QueryTimeout int              `yaml:"query_timeout"` // Seconds per upstream query; default 5.
 
 	// Global options.
-	Socks5       string `yaml:"socks5"`
-	SoMark       int    `yaml:"so_mark"`
-	BindToDevice string `yaml:"bind_to_device"`
-	Bootstrap    string `yaml:"bootstrap"`
-	BootstrapVer int    `yaml:"bootstrap_version"`
+	Socks5              string `yaml:"socks5"`
+	SoMark              int    `yaml:"so_mark"`
+	BindToDevice        string `yaml:"bind_to_device"`
+	Bootstrap           string `yaml:"bootstrap"`
+	BootstrapVer        int    `yaml:"bootstrap_version"`
+	TLSHandshakeTimeout int    `yaml:"tls_handshake_timeout"` // Seconds; default 3 for DoH.
+	DoHRequestTimeout   int    `yaml:"doh_request_timeout"`   // Seconds; default 6.
 }
 
 type UpstreamConfig struct {
-	Tag         string `yaml:"tag"`
-	Addr        string `yaml:"addr"` // Required.
-	DialAddr    string `yaml:"dial_addr"`
-	IdleTimeout int    `yaml:"idle_timeout"`
+	Tag                 string `yaml:"tag"`
+	Addr                string `yaml:"addr"` // Required.
+	DialAddr            string `yaml:"dial_addr"`
+	IdleTimeout         int    `yaml:"idle_timeout"`
+	QueryTimeout        int    `yaml:"query_timeout"`
+	TLSHandshakeTimeout int    `yaml:"tls_handshake_timeout"`
+	DoHRequestTimeout   int    `yaml:"doh_request_timeout"`
 
 	// Deprecated: This option has no affect.
 	// TODO: (v6) Remove this option.
@@ -133,6 +139,9 @@ func NewForward(args *Args, opt Opts) (*Forward, error) {
 		utils.SetDefaultString(&c.BindToDevice, args.BindToDevice)
 		utils.SetDefaultString(&c.Bootstrap, args.Bootstrap)
 		utils.SetDefaultUnsignNum(&c.BootstrapVer, args.BootstrapVer)
+		utils.SetDefaultNum(&c.TLSHandshakeTimeout, args.TLSHandshakeTimeout)
+		utils.SetDefaultNum(&c.DoHRequestTimeout, args.DoHRequestTimeout)
+		utils.SetDefaultNum(&c.QueryTimeout, args.QueryTimeout)
 	}
 
 	for i, c := range args.Upstreams {
@@ -143,15 +152,17 @@ func NewForward(args *Args, opt Opts) (*Forward, error) {
 
 		uw := newWrapper(i, c, opt.MetricsTag)
 		uOpt := upstream.Opt{
-			DialAddr:       c.DialAddr,
-			Socks5:         c.Socks5,
-			SoMark:         c.SoMark,
-			BindToDevice:   c.BindToDevice,
-			IdleTimeout:    time.Duration(c.IdleTimeout) * time.Second,
-			EnablePipeline: c.EnablePipeline,
-			EnableHTTP3:    c.EnableHTTP3,
-			Bootstrap:      c.Bootstrap,
-			BootstrapVer:   c.BootstrapVer,
+			DialAddr:            c.DialAddr,
+			Socks5:              c.Socks5,
+			SoMark:              c.SoMark,
+			BindToDevice:        c.BindToDevice,
+			IdleTimeout:         time.Duration(c.IdleTimeout) * time.Second,
+			TLSHandshakeTimeout: time.Duration(c.TLSHandshakeTimeout) * time.Second,
+			DoHRequestTimeout:   time.Duration(c.DoHRequestTimeout) * time.Second,
+			EnablePipeline:      c.EnablePipeline,
+			EnableHTTP3:         c.EnableHTTP3,
+			Bootstrap:           c.Bootstrap,
+			BootstrapVer:        c.BootstrapVer,
 			TLSConfig: &tls.Config{
 				InsecureSkipVerify: c.InsecureSkipVerify,
 				ClientSessionCache: tls.NewLRUClientSessionCache(4),
@@ -269,6 +280,10 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 		go func(uqid uint32, question dns.Question) {
 			defer pool.ReleaseBuf(qc)
 			// Give each upstream a fixed timeout to finish the query.
+			queryTimeout := time.Duration(u.cfg.QueryTimeout) * time.Second
+			if queryTimeout <= 0 {
+				queryTimeout = defaultQueryTimeout
+			}
 			upstreamCtx, cancel := context.WithTimeout(context.Background(), queryTimeout)
 			defer cancel()
 
