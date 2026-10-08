@@ -1,14 +1,18 @@
-FROM --platform=${TARGETPLATFORM} golang:latest as builder
+FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 
-ARG CGO_ENABLED=0
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev/unknown
 
-COPY ./ /root/src/
-WORKDIR /root/src/
-RUN go build -ldflags "-s -w -X main.version=$(git describe --tags --long --always)" -trimpath -o mosdns
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags "-s -w -X main.version=${VERSION}" -trimpath -o /mosdns .
 
-
-FROM --platform=${TARGETPLATFORM} alpine:latest
-
-COPY --from=builder /root/src/mosdns /usr/bin/
+FROM alpine:latest
 
 RUN apk add --no-cache ca-certificates
+COPY --from=builder /mosdns /usr/bin/mosdns
+ENTRYPOINT ["/usr/bin/mosdns"]
