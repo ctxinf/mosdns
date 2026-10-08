@@ -16,3 +16,4 @@ FROM alpine:latest
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /mosdns /usr/bin/mosdns
 ENTRYPOINT ["/usr/bin/mosdns"]
+CMD ["start"]
